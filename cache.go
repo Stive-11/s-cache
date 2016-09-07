@@ -2,7 +2,9 @@ package cache
 
 import (
 	"fmt"
+	"hash/fnv"
 	"runtime"
+	"sync"
 	"time"
 )
 
@@ -15,6 +17,21 @@ const (
 	DefaultExpiration time.Duration = 0
 )
 
+type shardmap struct {
+	shards     []*lockMap
+	shardCount uint64
+}
+
+type lockMap struct {
+	sync.RWMutex
+	m map[uint64]Item
+}
+
+type Item struct {
+	Object     interface{}
+	Expiration int64
+}
+
 type Cache struct {
 	*cache
 	// If this is confusing, see the comment at the bottom of New()
@@ -24,6 +41,32 @@ type cache struct {
 	defaultExpiration time.Duration
 	items             shardmap
 	janitor           *janitor
+}
+
+func newShardMap() shardmap {
+	//TODO param shards
+	return shardmap{
+		shards:     make([]*lockMap, 10),
+		shardCount: uint64(10),
+	}
+}
+
+// Returns true if the item has expired.
+func (item Item) expired() bool {
+	if item.Expiration == 0 {
+		return false
+	}
+	return time.Now().UnixNano() > item.Expiration
+}
+
+func (c *cache) GetShard(key uint64) *lockMap {
+	return c.items.shards[key%c.items.shardCount]
+}
+
+func calcHash(str string) uint64 {
+	hash := fnv.New64a()
+	hash.Write([]byte(str))
+	return hash.Sum64()
 }
 
 // Add an item to the cache, replacing any existing item. If the duration is 0
@@ -39,10 +82,14 @@ func (c *cache) Set(k string, x interface{}, d time.Duration) {
 		e = time.Now().Add(d).UnixNano()
 	}
 
-	c.items.Add(k, Item{
+	key := calcHash(k)
+	shard := c.GetShard(key)
+	shard.Lock()
+	shard.m[key] = Item{
 		Object:     x,
 		Expiration: e,
-	})
+	}
+	shard.Unlock()
 }
 
 // Add an item to the cache only if an item doesn't already exist for the given
@@ -70,23 +117,31 @@ func (c *cache) Replace(k string, x interface{}, d time.Duration) error {
 // Get an item from the cache. Returns the item or nil, and a bool indicating
 // whether the key was found.
 func (c *cache) Get(k string) (interface{}, bool) {
-	// "Inlining" of get and Expired
-	item, _ := c.items.Get(k)
-	if item != nil {
+	// "Inlining" of get and expired
+	key := calcHash(k)
+	shard := c.GetShard(key)
+	shard.RLock()
+	item, found := shard.m[key]
+	shard.RUnlock()
+
+	if found {
 		return nil, false
 	}
-	if item.Expiration > 0 {
-		if time.Now().UnixNano() > item.Expiration {
-			return nil, false
-		}
+
+	if item.expired() {
+		return nil, false
 	}
+
 	return item.Object, true
 }
 
 func (c *cache) Delete(k string) (interface{}, bool) {
+	key := calcHash(k)
+	shard := c.GetShard(key)
+	v, f := shard.m[key]
 
-	v := c.items.Delete(k)
-	if v != nil {
+	if f {
+		delete(shard.m, key)
 		return v.Object, true
 	}
 	return nil, false
@@ -108,12 +163,18 @@ func (c *cache) DeleteExpired() {
 // Returns the number of items in the cache. This may include items that have
 // expired, but have not yet been cleaned up. Equivalent to len(c.Items()).
 func (c *cache) ItemCount() int {
-	return c.items.Size()
+	size := 0
+	for _, m := range c.items.shards {
+		m.RLock()
+		size += len(m.m)
+		m.RUnlock()
+	}
+	return size
 }
 
 // Delete all items from the cache.
 func (c *cache) Flush() {
-	c.items = NewShardMap() //TODO init with params
+	c.items = newShardMap() //TODO init with params
 }
 
 type janitor struct {
@@ -153,7 +214,7 @@ func newCache(de time.Duration) *cache {
 	}
 	c := &cache{
 		defaultExpiration: de,
-		items:             NewShardMap(),
+		items:             newShardMap(),
 	}
 	return c
 }
