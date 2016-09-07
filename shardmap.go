@@ -50,6 +50,7 @@ func (item Item) Expired() bool {
 }
 
 func (s *shardmap) Add(key string, value Item) error {
+
 	return nil
 }
 
@@ -57,20 +58,32 @@ func (s *shardmap) Replace(key string, value Item) error {
 	return nil
 }
 
-func (s *shardmap) Set(key string, value Item) error {
+func (s *shardmap) Set(key string, value *Item) {
+	k := calcHash(key)
+	shard := s.getShard(k)
+	shard.Lock()
+	shard.m[k] = value
+	shard.Unlock()
+}
+
+func (s *shardmap) Get(key string) (*Item, bool) {
+	k := calcHash(key)
+	shard := s.getShard(k)
+	shard.RLock()
+	v, found := shard.m[k]
+	shard.RUnlock()
+	return v, found
+}
+
+func (s *shardmap) Delete(key string) *Item {
+	k := calcHash(key)
+	shard := s.getShard(k)
+	if v, f := shard.m[k]; f {
+		delete(shard.m, k)
+		return v
+	}
 	return nil
-}
 
-func (s *shardmap) Get(key string) (*Item, error) {
-	return nil, nil
-}
-
-func (s *shardmap) Delete(key string) (*Item, error) {
-	return nil, nil
-}
-
-func (s *shardmap) Flush() error {
-	return nil
 }
 
 func (s *shardmap) getShard(key uint64) LockMap {

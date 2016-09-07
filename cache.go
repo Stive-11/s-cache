@@ -85,7 +85,7 @@ func (c *cache) Get(k string) (interface{}, bool) {
 
 func (c *cache) Delete(k string) (interface{}, bool) {
 
-	v, _ := c.items.Delete(k)
+	v := c.items.Delete(k)
 	if v != nil {
 		return v.Object, true
 	}
