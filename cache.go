@@ -44,11 +44,15 @@ type cache struct {
 }
 
 func newShardMap() shardmap {
-	//TODO param shards
-	return shardmap{
-		shards:     make([]*lockMap, 10),
-		shardCount: uint64(10),
+	count := uint64(10)
+	smap := shardmap{
+		shards:     make([]*lockMap, count),
+		shardCount: count,
 	}
+	for i, _ := range smap.shards {
+		smap.shards[i] = &lockMap{m: make(map[uint64]Item)}
+	}
+	return smap
 }
 
 // Returns true if the item has expired.
@@ -148,16 +152,17 @@ func (c *cache) Delete(k string) (interface{}, bool) {
 }
 
 // Delete all expired items from the cache.
-//TODO move to shard map
+
+//TODO repair
 func (c *cache) DeleteExpired() {
-	//	now := time.Now().UnixNano()
-	//	for k, v := range c.items {
-	//	// "Inlining" of expired
-	//if v.Expiration > 0 && now > v.Expiration {
-	//c.Delete(k)
-	//}
-	//}
+	//now := time.Now().UnixNano()
+	//for k, v := range c.items {
 	//
+	//	if v.Expiration > 0 && now > v.Expiration {
+	//	c.Delete(k)
+	//}
+	//}
+
 }
 
 // Returns the number of items in the cache. This may include items that have
