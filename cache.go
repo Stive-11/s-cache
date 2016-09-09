@@ -5,6 +5,7 @@ import (
 	"hash/fnv"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -41,10 +42,16 @@ type cache struct {
 	defaultExpiration time.Duration
 	items             shardmap
 	janitor           *janitor
+	Statistic         stats
+}
+
+type stats struct {
+	ItemsCount, GetCount, SetCount, ReplaceCount, DeleteCount, AddCount int32
 }
 
 func newShardMap() shardmap {
 	count := uint64(10)
+
 	smap := shardmap{
 		shards:     make([]*lockMap, count),
 		shardCount: count,
@@ -88,6 +95,8 @@ func (c *cache) Set(k string, x interface{}, d time.Duration) {
 
 	key := calcHash(k)
 	shard := c.GetShard(key)
+	atomic.AddInt32(&c.Statistic.SetCount, 1)
+	atomic.AddInt32(&c.Statistic.ItemsCount, 1)
 	shard.Lock()
 	shard.m[key] = Item{
 		Object:     x,
@@ -103,6 +112,8 @@ func (c *cache) Add(k string, x interface{}, d time.Duration) error {
 	if found {
 		return fmt.Errorf("Item %s already exists", k)
 	}
+	atomic.AddInt32(&c.Statistic.AddCount, 1)
+	atomic.AddInt32(&c.Statistic.ItemsCount, 1)
 	c.Set(k, x, d)
 	return nil
 }
@@ -114,6 +125,8 @@ func (c *cache) Replace(k string, x interface{}, d time.Duration) error {
 	if !found {
 		return fmt.Errorf("Item %s doesn't exist", k)
 	}
+	atomic.AddInt32(&c.Statistic.ReplaceCount, 1)
+	atomic.AddInt32(&c.Statistic.ItemsCount, 1)
 	c.Set(k, x, d)
 	return nil
 }
@@ -136,6 +149,7 @@ func (c *cache) Get(k string) (interface{}, bool) {
 		return nil, false
 	}
 
+	atomic.AddInt32(&c.Statistic.GetCount, 1)
 	return item.Object, true
 }
 
@@ -145,6 +159,8 @@ func (c *cache) Delete(k string) (interface{}, bool) {
 	v, f := shard.m[key]
 
 	if f {
+		atomic.AddInt32(&c.Statistic.ItemsCount, -1)
+		atomic.AddInt32(&c.Statistic.DeleteCount, -1)
 		delete(shard.m, key)
 		return v.Object, true
 	}
@@ -167,7 +183,7 @@ func (c *cache) DeleteExpired() {
 
 // Returns the number of items in the cache. This may include items that have
 // expired, but have not yet been cleaned up. Equivalent to len(c.Items()).
-func (c *cache) ItemCount() int {
+func (c *cache) ItemCount() int { //TODO maybe get from statistics ?
 	size := 0
 	for _, m := range c.items.shards {
 		m.RLock()
@@ -180,6 +196,7 @@ func (c *cache) ItemCount() int {
 // Delete all items from the cache.
 func (c *cache) Flush() {
 	c.items = newShardMap() //TODO init with params
+	c.Statistic.ItemsCount = 0
 }
 
 type janitor struct {

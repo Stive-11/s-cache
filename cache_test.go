@@ -8,6 +8,7 @@ import (
 	"time"
 )
 
+//TODO statistic tests
 type TestStruct struct {
 	Num      int
 	Children []*TestStruct
