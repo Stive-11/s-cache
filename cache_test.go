@@ -8,7 +8,6 @@ import (
 	"time"
 )
 
-//TODO statistic tests
 type TestStruct struct {
 	Num      int
 	Children []*TestStruct
@@ -106,6 +105,8 @@ func TestCacheTimes(t *testing.T) {
 }
 
 //TODO init tests
+//TODO expiration tests
+//TODO statistic tests
 
 func TestStorePointerToStruct(t *testing.T) {
 	tc := New(DefaultExpiration, 0)
