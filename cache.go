@@ -18,11 +18,6 @@ const (
 	DefaultExpiration time.Duration = 0
 )
 
-type shardmap struct {
-	shards     []*lockMap
-	shardCount uint64
-}
-
 type lockMap struct {
 	sync.RWMutex
 	m map[uint64]Item
@@ -40,7 +35,8 @@ type Cache struct {
 
 type cache struct {
 	defaultExpiration time.Duration
-	shards            shardmap
+	shards            []*lockMap
+	shardCount        uint64
 	janitor           *janitor
 	Statistic         stats
 }
@@ -49,17 +45,15 @@ type stats struct {
 	ItemsCount, GetCount, SetCount, ReplaceCount, DeleteCount, AddCount, DeleteExpired int32
 }
 
-func newShardMap() shardmap {
+func (c *cache) newShardMap() {
 	count := uint64(10)
 
-	smap := shardmap{
-		shards:     make([]*lockMap, count),
-		shardCount: count,
+	c.shards = make([]*lockMap, count)
+	c.shardCount = count
+
+	for i, _ := range c.shards {
+		c.shards[i] = &lockMap{m: make(map[uint64]Item)}
 	}
-	for i, _ := range smap.shards {
-		smap.shards[i] = &lockMap{m: make(map[uint64]Item)}
-	}
-	return smap
 }
 
 // Returns true if the item has expired.
@@ -71,7 +65,7 @@ func (item Item) expired() bool {
 }
 
 func (c *cache) GetShard(key uint64) *lockMap {
-	return c.shards.shards[key%c.shards.shardCount]
+	return c.shards[key%c.shardCount]
 }
 
 func calcHash(str string) uint64 {
@@ -170,8 +164,8 @@ func (c *cache) Delete(k string) (interface{}, bool) {
 // Delete all expired items from the cache.
 func (c *cache) DeleteExpired() {
 	now := time.Now().UnixNano()
-	for i, _ := range c.shards.shards {
-		sh := c.shards.shards[i]
+	for i, _ := range c.shards {
+		sh := c.shards[i]
 		sh.Lock()
 		for k, v := range sh.m {
 			if v.Expiration > 0 && now > v.Expiration {
@@ -189,7 +183,7 @@ func (c *cache) DeleteExpired() {
 // expired, but have not yet been cleaned up. Equivalent to len(c.Items()).
 func (c *cache) ItemCount() int { //TODO maybe get from statistics ?
 	size := 0
-	for _, m := range c.shards.shards {
+	for _, m := range c.shards {
 		m.RLock()
 		size += len(m.m)
 		m.RUnlock()
@@ -199,7 +193,7 @@ func (c *cache) ItemCount() int { //TODO maybe get from statistics ?
 
 // Delete all items from the cache.
 func (c *cache) Flush() {
-	c.shards = newShardMap() //TODO init with params
+	c.newShardMap() //TODO init with params
 	c.Statistic.ItemsCount = 0
 }
 
@@ -240,8 +234,8 @@ func newCache(de time.Duration) *cache {
 	}
 	c := &cache{
 		defaultExpiration: de,
-		shards:            newShardMap(),
 	}
+	c.newShardMap()
 	return c
 }
 
