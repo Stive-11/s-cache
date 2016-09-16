@@ -123,7 +123,7 @@ func TestStatistic(t *testing.T) {
 		t.Error("Statistic.AddCount for add new item was not increased")
 	}
 	if (st1.ItemsCount - stStart.ItemsCount) != 1 {
-		t.Error("Statistic.ItemsCount for add new item was not increased")
+		t.Errorf("Statistic.ItemsCount for add new item was wrong delta: %d, but expected 1", st1.ItemsCount-stStart.ItemsCount)
 	}
 
 	tc.Get("foo")

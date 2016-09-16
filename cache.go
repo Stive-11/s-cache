@@ -78,6 +78,11 @@ func calcHash(str string) uint64 {
 // (DefaultExpiration), the cache's default expiration time is used. If it is -1
 // (NoExpiration), the item never expires.
 func (c *cache) Set(k string, x interface{}, d time.Duration) {
+	atomic.AddInt32(&c.Statistic.SetCount, 1)
+	c.set(k, x, d)
+}
+
+func (c *cache) set(k string, x interface{}, d time.Duration) {
 	// "Inlining" of set
 	var e int64
 	if d == DefaultExpiration {
@@ -89,7 +94,6 @@ func (c *cache) Set(k string, x interface{}, d time.Duration) {
 
 	key := calcHash(k)
 	shard := c.GetShard(key)
-	atomic.AddInt32(&c.Statistic.SetCount, 1)
 	atomic.AddInt32(&c.Statistic.ItemsCount, 1)
 	shard.Lock()
 	shard.m[key] = Item{
@@ -107,8 +111,7 @@ func (c *cache) Add(k string, x interface{}, d time.Duration) error {
 		return fmt.Errorf("Item %s already exists", k)
 	}
 	atomic.AddInt32(&c.Statistic.AddCount, 1)
-	atomic.AddInt32(&c.Statistic.ItemsCount, 1)
-	c.Set(k, x, d)
+	c.set(k, x, d)
 	return nil
 }
 
@@ -120,8 +123,8 @@ func (c *cache) Replace(k string, x interface{}, d time.Duration) error {
 		return fmt.Errorf("Item %s doesn't exist", k)
 	}
 	atomic.AddInt32(&c.Statistic.ReplaceCount, 1)
-	atomic.AddInt32(&c.Statistic.ItemsCount, 1)
-	c.Set(k, x, d)
+	atomic.AddInt32(&c.Statistic.ItemsCount, -1) //TODO is it rigth hack ?
+	c.set(k, x, d)
 	return nil
 }
 
