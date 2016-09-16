@@ -147,6 +147,10 @@ func (c *cache) Get(k string) (interface{}, bool) {
 	return item.Object, true
 }
 
+func (c *cache) GetStatistic() stats {
+	return c.Statistic
+}
+
 func (c *cache) Delete(k string) (interface{}, bool) {
 	key := calcHash(k)
 	shard := c.GetShard(key)
@@ -181,14 +185,8 @@ func (c *cache) DeleteExpired() {
 
 // Returns the number of items in the cache. This may include items that have
 // expired, but have not yet been cleaned up. Equivalent to len(c.Items()).
-func (c *cache) ItemCount() int { //TODO maybe get from statistics ?
-	size := 0
-	for _, m := range c.shards {
-		m.RLock()
-		size += len(m.m)
-		m.RUnlock()
-	}
-	return size
+func (c *cache) ItemCount() int32 {
+	return c.Statistic.ItemsCount
 }
 
 // Delete all items from the cache.
@@ -239,8 +237,19 @@ func newCache(de time.Duration) *cache {
 	return c
 }
 
+func cleanupStatistic(c *cache) {
+	c.Statistic.AddCount = 0
+	c.Statistic.DeleteCount = 0
+	c.Statistic.DeleteExpired = 0
+	c.Statistic.GetCount = 0
+	c.Statistic.ItemsCount = 0
+	c.Statistic.ReplaceCount = 0
+	c.Statistic.SetCount = 0
+}
+
 func newCacheWithJanitor(de time.Duration, ci time.Duration) *Cache {
 	c := newCache(de)
+	cleanupStatistic(c)
 	// This trick ensures that the janitor goroutine (which--granted it
 	// was enabled--is running DeleteExpired on c forever) does not keep
 	// the returned C object from being garbage collected. When it is

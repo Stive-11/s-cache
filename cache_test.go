@@ -108,6 +108,38 @@ func TestCacheTimes(t *testing.T) {
 //TODO expiration tests
 //TODO statistic tests
 
+func TestStatistic(t *testing.T) {
+	tc := New(DefaultExpiration, 0)
+	stStart := tc.GetStatistic()
+	if stStart.AddCount != 0 || stStart.DeleteCount != 0 || stStart.DeleteExpired != 0 ||
+		stStart.GetCount != 0 || stStart.ItemsCount != 0 ||
+		stStart.ReplaceCount != 0 || stStart.SetCount != 0 {
+		t.Error("Statistic for new cach was not 0")
+	}
+
+	tc.Add("foo", 1, DefaultExpiration)
+	st1 := tc.GetStatistic()
+	if (st1.AddCount - stStart.AddCount) != 1 {
+		t.Error("Statistic.AddCount for add new item was not increased")
+	}
+	if (st1.ItemsCount - stStart.ItemsCount) != 1 {
+		t.Error("Statistic.ItemsCount for add new item was not increased")
+	}
+
+	tc.Get("foo")
+	st1 = tc.GetStatistic()
+	if (st1.GetCount - stStart.GetCount) != 1 {
+		t.Error("Statistic.GetCount was not increased after Get()")
+	}
+
+	tc.Get("foofoo")
+	st2 := tc.GetStatistic()
+	if (st2.GetCount - st1.GetCount) != 0 {
+		t.Error("Statistic.GetCount was increased after error Get()")
+	}
+
+}
+
 func TestStorePointerToStruct(t *testing.T) {
 	tc := New(DefaultExpiration, 0)
 	tc.Set("foo", &TestStruct{Num: 1}, DefaultExpiration)
