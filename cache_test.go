@@ -41,7 +41,7 @@ func TestCache(t *testing.T) {
 	}
 	if x == nil {
 		t.Error("x for a is nil")
-	} else if a2 := x[0]; a2+2 != 3 {
+	} else if a2 := x.([]byte)[0]; a2+2 != 3 {
 		t.Error("a2 (which should be 1) plus 2 does not equal 3; value:", a2)
 	}
 
@@ -51,7 +51,7 @@ func TestCache(t *testing.T) {
 	}
 	if x == nil {
 		t.Error("x for b is nil")
-	} else if b2 := string(x); b2+"B" != "bB" {
+	} else if b2 := string(x.([]byte)); b2+"B" != "bB" {
 		t.Error("b2 (which should be b) plus B does not equal bB; value:", b2)
 	}
 
@@ -61,7 +61,7 @@ func TestCache(t *testing.T) {
 	}
 	if x == nil {
 		t.Error("x for c is nil")
-	} else if c2, _ := strconv.ParseFloat(string(x), 64); c2+1.2 != 4.7 {
+	} else if c2, _ := strconv.ParseFloat(string(x.([]byte)), 64); c2+1.2 != 4.7 {
 		t.Error("c2 (which should be 3.5) plus 1.2 does not equal 4.7; value:", c2)
 	}
 }

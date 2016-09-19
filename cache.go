@@ -35,7 +35,7 @@ type Cache struct {
 
 type cache struct {
 	defaultExpiration time.Duration
-	shards            []*lockMap
+	shards            []lockMap
 	shardCount        uint64
 	janitor           *janitor
 	Statistic         stats
@@ -48,11 +48,11 @@ type stats struct {
 func (c *cache) newShardMap() {
 	count := uint64(10)
 
-	c.shards = make([]*lockMap, count)
+	c.shards = make([]lockMap, count)
 	c.shardCount = count
 
 	for i, _ := range c.shards {
-		c.shards[i] = &lockMap{m: make(map[uint64]Item)}
+		c.shards[i] = lockMap{m: make(map[uint64]Item)}
 	}
 }
 
@@ -64,7 +64,7 @@ func (item Item) expired() bool {
 	return time.Now().UnixNano() > item.Expiration
 }
 
-func (c *cache) GetShard(key uint64) *lockMap {
+func (c *cache) GetShard(key uint64) lockMap {
 	return c.shards[key%c.shardCount]
 }
 
@@ -130,7 +130,7 @@ func (c *cache) Replace(k string, x []byte, d time.Duration) error {
 
 // Get an item from the cache. Returns the item or nil, and a bool indicating
 // whether the key was found.
-func (c *cache) Get(k string) ([]byte, bool) {
+func (c *cache) Get(k string) (interface{}, bool) {
 	// "Inlining" of get and expired
 	key := calcHash(k)
 	shard := c.GetShard(key)
@@ -142,12 +142,12 @@ func (c *cache) Get(k string) ([]byte, bool) {
 		atomic.AddInt32(&c.Statistic.ErrorGetCount, 1)
 		return nil, false
 	}
-
-	if item.expired() {
-		atomic.AddInt32(&c.Statistic.ErrorGetCount, 1)
-		return nil, false
-	}
-
+	/*
+		if item.expired() {
+			atomic.AddInt32(&c.Statistic.ErrorGetCount, 1)
+			return nil, false
+		}
+	*/
 	atomic.AddInt32(&c.Statistic.GetCount, 1)
 	return item.Object, true
 }
