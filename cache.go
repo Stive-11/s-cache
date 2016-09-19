@@ -24,7 +24,7 @@ type lockMap struct {
 }
 
 type Item struct {
-	Object     interface{}
+	Object     []byte
 	Expiration int64
 }
 
@@ -42,7 +42,7 @@ type cache struct {
 }
 
 type stats struct {
-	ItemsCount, GetCount, SetCount, ReplaceCount, DeleteCount, AddCount, DeleteExpired int32
+	ItemsCount, GetCount, ErrorGetCount, SetCount, ReplaceCount, DeleteCount, AddCount, DeleteExpired int32
 }
 
 func (c *cache) newShardMap() {
@@ -77,12 +77,12 @@ func calcHash(str string) uint64 {
 // Add an item to the cache, replacing any existing item. If the duration is 0
 // (DefaultExpiration), the cache's default expiration time is used. If it is -1
 // (NoExpiration), the item never expires.
-func (c *cache) Set(k string, x interface{}, d time.Duration) {
+func (c *cache) Set(k string, x []byte, d time.Duration) {
 	atomic.AddInt32(&c.Statistic.SetCount, 1)
 	c.set(k, x, d)
 }
 
-func (c *cache) set(k string, x interface{}, d time.Duration) {
+func (c *cache) set(k string, x []byte, d time.Duration) {
 	// "Inlining" of set
 	var e int64
 	if d == DefaultExpiration {
@@ -105,7 +105,7 @@ func (c *cache) set(k string, x interface{}, d time.Duration) {
 
 // Add an item to the cache only if an item doesn't already exist for the given
 // key, or if the existing item has expired. Returns an error otherwise.
-func (c *cache) Add(k string, x interface{}, d time.Duration) error {
+func (c *cache) Add(k string, x []byte, d time.Duration) error {
 	_, found := c.Get(k)
 	if found {
 		return fmt.Errorf("Item %s already exists", k)
@@ -117,7 +117,7 @@ func (c *cache) Add(k string, x interface{}, d time.Duration) error {
 
 // Set a new value for the cache key only if it already exists, and the existing
 // item hasn't expired. Returns an error otherwise.
-func (c *cache) Replace(k string, x interface{}, d time.Duration) error {
+func (c *cache) Replace(k string, x []byte, d time.Duration) error {
 	_, found := c.Get(k)
 	if !found {
 		return fmt.Errorf("Item %s doesn't exist", k)
@@ -130,7 +130,7 @@ func (c *cache) Replace(k string, x interface{}, d time.Duration) error {
 
 // Get an item from the cache. Returns the item or nil, and a bool indicating
 // whether the key was found.
-func (c *cache) Get(k string) (interface{}, bool) {
+func (c *cache) Get(k string) ([]byte, bool) {
 	// "Inlining" of get and expired
 	key := calcHash(k)
 	shard := c.GetShard(key)
@@ -139,19 +139,17 @@ func (c *cache) Get(k string) (interface{}, bool) {
 	shard.RUnlock()
 
 	if !found {
+		atomic.AddInt32(&c.Statistic.ErrorGetCount, 1)
 		return nil, false
 	}
 
 	if item.expired() {
+		atomic.AddInt32(&c.Statistic.ErrorGetCount, 1)
 		return nil, false
 	}
 
 	atomic.AddInt32(&c.Statistic.GetCount, 1)
 	return item.Object, true
-}
-
-func (c *cache) GetStatistic() stats {
-	return c.Statistic
 }
 
 func (c *cache) Delete(k string) (interface{}, bool) {
@@ -240,19 +238,8 @@ func newCache(de time.Duration) *cache {
 	return c
 }
 
-func cleanupStatistic(c *cache) {
-	c.Statistic.AddCount = 0
-	c.Statistic.DeleteCount = 0
-	c.Statistic.DeleteExpired = 0
-	c.Statistic.GetCount = 0
-	c.Statistic.ItemsCount = 0
-	c.Statistic.ReplaceCount = 0
-	c.Statistic.SetCount = 0
-}
-
 func newCacheWithJanitor(de time.Duration, ci time.Duration) *Cache {
 	c := newCache(de)
-	cleanupStatistic(c)
 	// This trick ensures that the janitor goroutine (which--granted it
 	// was enabled--is running DeleteExpired on c forever) does not keep
 	// the returned C object from being garbage collected. When it is

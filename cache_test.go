@@ -31,9 +31,9 @@ func TestCache(t *testing.T) {
 		t.Error("Getting C found value that shouldn't exist:", c)
 	}
 
-	tc.Set("a", 1, DefaultExpiration)
-	tc.Set("b", "b", DefaultExpiration)
-	tc.Set("c", 3.5, DefaultExpiration)
+	tc.Set("a", []byte{1}, DefaultExpiration)
+	tc.Set("b", []byte("b"), DefaultExpiration)
+	tc.Set("c", []byte("3.5"), DefaultExpiration)
 
 	x, found := tc.Get("a")
 	if !found {
@@ -41,7 +41,7 @@ func TestCache(t *testing.T) {
 	}
 	if x == nil {
 		t.Error("x for a is nil")
-	} else if a2 := x.(int); a2+2 != 3 {
+	} else if a2 := x[0]; a2+2 != 3 {
 		t.Error("a2 (which should be 1) plus 2 does not equal 3; value:", a2)
 	}
 
@@ -51,7 +51,7 @@ func TestCache(t *testing.T) {
 	}
 	if x == nil {
 		t.Error("x for b is nil")
-	} else if b2 := x.(string); b2+"B" != "bB" {
+	} else if b2 := string(x); b2+"B" != "bB" {
 		t.Error("b2 (which should be b) plus B does not equal bB; value:", b2)
 	}
 
@@ -61,7 +61,7 @@ func TestCache(t *testing.T) {
 	}
 	if x == nil {
 		t.Error("x for c is nil")
-	} else if c2 := x.(float64); c2+1.2 != 4.7 {
+	} else if c2, _ := strconv.ParseFloat(string(x), 64); c2+1.2 != 4.7 {
 		t.Error("c2 (which should be 3.5) plus 1.2 does not equal 4.7; value:", c2)
 	}
 }
@@ -70,10 +70,10 @@ func TestCacheTimes(t *testing.T) {
 	var found bool
 
 	tc := New(50*time.Millisecond, 1*time.Millisecond)
-	tc.Set("a", 1, DefaultExpiration)
-	tc.Set("b", 2, NoExpiration)
-	tc.Set("c", 3, 20*time.Millisecond)
-	tc.Set("d", 4, 70*time.Millisecond)
+	tc.Set("a", []byte{1}, DefaultExpiration)
+	tc.Set("b", []byte{2}, NoExpiration)
+	tc.Set("c", []byte{3}, 20*time.Millisecond)
+	tc.Set("d", []byte{4}, 70*time.Millisecond)
 
 	<-time.After(25 * time.Millisecond)
 	_, found = tc.Get("c")
@@ -106,19 +106,18 @@ func TestCacheTimes(t *testing.T) {
 
 //TODO init tests
 //TODO expiration tests
-//TODO statistic tests
 
 func TestStatistic(t *testing.T) {
 	tc := New(DefaultExpiration, 0)
-	stStart := tc.GetStatistic()
+	stStart := tc.Statistic
 	if stStart.AddCount != 0 || stStart.DeleteCount != 0 || stStart.DeleteExpired != 0 ||
 		stStart.GetCount != 0 || stStart.ItemsCount != 0 ||
 		stStart.ReplaceCount != 0 || stStart.SetCount != 0 {
 		t.Error("Statistic for new cach was not 0")
 	}
 
-	tc.Add("foo", 1, DefaultExpiration)
-	st1 := tc.GetStatistic()
+	tc.Add("foo", []byte{1}, DefaultExpiration)
+	st1 := tc.Statistic
 	if (st1.AddCount - stStart.AddCount) != 1 {
 		t.Error("Statistic.AddCount for add new item was not increased")
 	}
@@ -127,46 +126,52 @@ func TestStatistic(t *testing.T) {
 	}
 
 	tc.Get("foo")
-	st1 = tc.GetStatistic()
+	st1 = tc.Statistic
 	if (st1.GetCount - stStart.GetCount) != 1 {
 		t.Error("Statistic.GetCount was not increased after Get()")
 	}
 
 	tc.Get("foofoo")
-	st2 := tc.GetStatistic()
+	st2 := tc.Statistic
 	if (st2.GetCount - st1.GetCount) != 0 {
 		t.Error("Statistic.GetCount was increased after error Get()")
 	}
-
-}
-
-func TestStorePointerToStruct(t *testing.T) {
-	tc := New(DefaultExpiration, 0)
-	tc.Set("foo", &TestStruct{Num: 1}, DefaultExpiration)
-	x, found := tc.Get("foo")
-	if !found {
-		t.Fatal("*TestStruct was not found for foo")
+	if (st2.ErrorGetCount - st1.ErrorGetCount) != 1 {
+		t.Error("Statistic.ErrorGetCount was not increased after error Get()")
 	}
-	foo := x.(*TestStruct)
-	foo.Num++
 
-	y, found := tc.Get("foo")
-	if !found {
-		t.Fatal("*TestStruct was not found for foo (second time)")
+	tc.Replace("foofoo", []byte("bar"), DefaultExpiration)
+	if (tc.Statistic.ReplaceCount - st2.ReplaceCount) != 0 {
+		t.Error("Statistic.ReplaceCount was increased after error Replace()")
 	}
-	bar := y.(*TestStruct)
-	if bar.Num != 2 {
-		t.Fatal("TestStruct.Num is not 2")
+	tc.Replace("foo", []byte("bar"), DefaultExpiration)
+	if (tc.Statistic.ReplaceCount - st2.ReplaceCount) != 1 {
+		t.Error("Statistic.ReplaceCount was not increased after Replace()")
+	}
+
+	tc.Delete("foo1")
+	if (tc.Statistic.DeleteCount - st2.DeleteCount) != 0 {
+		t.Error("Statistic.DeleteCount was increased after error Delete()")
+	}
+	if (st2.ItemsCount - tc.Statistic.ItemsCount) != 0 {
+		t.Error("Statistic.DeleteCount was changed after error Delete()")
+	}
+	tc.Delete("foo")
+	if (tc.Statistic.DeleteCount - st2.DeleteCount) != 1 {
+		t.Error("Statistic.DeleteCount was not increased after Delete()")
+	}
+	if (st2.ItemsCount - tc.Statistic.ItemsCount) != 1 {
+		t.Error("Statistic.DeleteCount was not changed after Delete()")
 	}
 }
 
 func TestAdd(t *testing.T) {
 	tc := New(DefaultExpiration, 0)
-	err := tc.Add("foo", "bar", DefaultExpiration)
+	err := tc.Add("foo", []byte("bar"), DefaultExpiration)
 	if err != nil {
 		t.Error("Couldn't add foo even though it shouldn't exist")
 	}
-	err = tc.Add("foo", "baz", DefaultExpiration)
+	err = tc.Add("foo", []byte("baz"), DefaultExpiration)
 	if err == nil {
 		t.Error("Successfully added another foo when it should have returned an error")
 	}
@@ -174,12 +179,12 @@ func TestAdd(t *testing.T) {
 
 func TestReplace(t *testing.T) {
 	tc := New(DefaultExpiration, 0)
-	err := tc.Replace("foo", "bar", DefaultExpiration)
+	err := tc.Replace("foo", []byte("bar"), DefaultExpiration)
 	if err == nil {
 		t.Error("Replaced foo when it shouldn't exist")
 	}
-	tc.Set("foo", "bar", DefaultExpiration)
-	err = tc.Replace("foo", "bar", DefaultExpiration)
+	tc.Set("foo", []byte("bar"), DefaultExpiration)
+	err = tc.Replace("foo", []byte("bar"), DefaultExpiration)
 	if err != nil {
 		t.Error("Couldn't replace existing key foo")
 	}
@@ -187,7 +192,7 @@ func TestReplace(t *testing.T) {
 
 func TestDelete(t *testing.T) {
 	tc := New(DefaultExpiration, 0)
-	tc.Set("foo", "bar", DefaultExpiration)
+	tc.Set("foo", []byte("bar"), DefaultExpiration)
 	tc.Delete("foo")
 	x, found := tc.Get("foo")
 	if found {
@@ -200,9 +205,9 @@ func TestDelete(t *testing.T) {
 
 func TestItemCount(t *testing.T) {
 	tc := New(DefaultExpiration, 0)
-	tc.Set("foo", "1", DefaultExpiration)
-	tc.Set("bar", "2", DefaultExpiration)
-	tc.Set("baz", "3", DefaultExpiration)
+	tc.Set("foo", []byte{1}, DefaultExpiration)
+	tc.Set("bar", []byte{2}, DefaultExpiration)
+	tc.Set("baz", []byte{3}, DefaultExpiration)
 	if n := tc.ItemCount(); n != 3 {
 		t.Errorf("Item count is not 3: %d", n)
 	}
@@ -210,8 +215,8 @@ func TestItemCount(t *testing.T) {
 
 func TestFlush(t *testing.T) {
 	tc := New(DefaultExpiration, 0)
-	tc.Set("foo", "bar", DefaultExpiration)
-	tc.Set("baz", "yes", DefaultExpiration)
+	tc.Set("foo", []byte("bar"), DefaultExpiration)
+	tc.Set("baz", []byte("yes"), DefaultExpiration)
 	tc.Flush()
 	x, found := tc.Get("foo")
 	if found {
@@ -421,7 +426,7 @@ func BenchmarkCacheGetNotExpiring(b *testing.B) {
 func benchmarkCacheGet(b *testing.B, exp time.Duration) {
 	b.StopTimer()
 	tc := New(exp, 0)
-	tc.Set("foo", "bar", DefaultExpiration)
+	tc.Set("foo", []byte("bar"), DefaultExpiration)
 	b.StartTimer()
 	for i := 0; i < b.N; i++ {
 		tc.Get("foo")
@@ -482,7 +487,7 @@ func BenchmarkCacheGetConcurrentNotExpiring(b *testing.B) {
 func benchmarkCacheGetConcurrent(b *testing.B, exp time.Duration) {
 	b.StopTimer()
 	tc := New(exp, 0)
-	tc.Set("foo", "bar", DefaultExpiration)
+	tc.Set("foo", []byte("bar"), DefaultExpiration)
 	wg := new(sync.WaitGroup)
 	workers := runtime.NumCPU()
 	each := b.N / workers
@@ -542,7 +547,7 @@ func benchmarkCacheGetManyConcurrent(b *testing.B, exp time.Duration) {
 	for i := 0; i < n; i++ {
 		k := "foo" + strconv.Itoa(n)
 		keys[i] = k
-		tc.Set(k, "bar", DefaultExpiration)
+		tc.Set(k, []byte("bar"), DefaultExpiration)
 	}
 	each := b.N / n
 	wg := new(sync.WaitGroup)
@@ -572,7 +577,7 @@ func benchmarkCacheSet(b *testing.B, exp time.Duration) {
 	tc := New(exp, 0)
 	b.StartTimer()
 	for i := 0; i < b.N; i++ {
-		tc.Set("foo", "bar", DefaultExpiration)
+		tc.Set("foo", []byte("bar"), DefaultExpiration)
 	}
 }
 
@@ -593,7 +598,7 @@ func BenchmarkCacheSetDelete(b *testing.B) {
 	tc := New(DefaultExpiration, 0)
 	b.StartTimer()
 	for i := 0; i < b.N; i++ {
-		tc.Set("foo", "bar", DefaultExpiration)
+		tc.Set("foo", []byte("bar"), DefaultExpiration)
 		tc.Delete("foo")
 	}
 }
@@ -618,7 +623,7 @@ func BenchmarkDeleteExpiredLoop(b *testing.B) {
 	tc := New(5*time.Minute, 0)
 
 	for i := 0; i < 100000; i++ {
-		tc.Set(strconv.Itoa(i), "bar", DefaultExpiration)
+		tc.Set(strconv.Itoa(i), []byte("bar"), DefaultExpiration)
 	}
 
 	b.StartTimer()
