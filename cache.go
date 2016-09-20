@@ -2,11 +2,12 @@ package cache
 
 import (
 	"fmt"
-	"hash/fnv"
 	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/spaolacci/murmur3"
 )
 
 const (
@@ -69,7 +70,7 @@ func (c *cache) GetShard(key uint64) lockMap {
 }
 
 func calcHash(str string) uint64 {
-	hash := fnv.New64a()
+	hash := murmur3.New64()
 	hash.Write([]byte(str))
 	return hash.Sum64()
 }
