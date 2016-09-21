@@ -19,12 +19,13 @@ const (
 )
 
 type lockMap struct {
-	sync.RWMutex
+	l sync.RWMutex
 	m map[uint64]Item
 }
 
 type Item struct {
 	Object     []byte
+	Size       int32
 	Expiration int64
 }
 
@@ -42,7 +43,7 @@ type cache struct {
 }
 
 type stats struct {
-	ItemsCount, GetCount, ErrorGetCount, SetCount, ReplaceCount, DeleteCount, AddCount, DeleteExpired int32
+	ItemsCount, GetCount, ErrorGetCount, SetCount, ReplaceCount, DeleteCount, AddCount, DeleteExpired, Size int32
 }
 
 func (c *cache) newShardMap() {
@@ -94,13 +95,16 @@ func (c *cache) set(k string, x []byte, d time.Duration) {
 
 	key := calcHash(k)
 	shard := c.GetShard(key)
+	size := int32(len(x))
 	atomic.AddInt32(&c.Statistic.ItemsCount, 1)
-	shard.Lock()
+	atomic.AddInt32(&c.Statistic.Size, size)
+	shard.l.Lock()
 	shard.m[key] = Item{
 		Object:     x,
+		Size:       size,
 		Expiration: e,
 	}
-	shard.Unlock()
+	shard.l.Unlock()
 }
 
 // Add an item to the cache only if an item doesn't already exist for the given
@@ -118,12 +122,14 @@ func (c *cache) Add(k string, x []byte, d time.Duration) error {
 // Set a new value for the cache key only if it already exists, and the existing
 // item hasn't expired. Returns an error otherwise.
 func (c *cache) Replace(k string, x []byte, d time.Duration) error {
-	_, found := c.Get(k)
+	o, found := c.Get(k)
 	if !found {
 		return fmt.Errorf("Item %s doesn't exist", k)
 	}
+	size := int32(len(o.([]byte)))
 	atomic.AddInt32(&c.Statistic.ReplaceCount, 1)
 	atomic.AddInt32(&c.Statistic.ItemsCount, -1) //TODO is it rigth hack ?
+	atomic.AddInt32(&c.Statistic.Size, -size)
 	c.set(k, x, d)
 	return nil
 }
@@ -134,9 +140,9 @@ func (c *cache) Get(k string) (interface{}, bool) {
 	// "Inlining" of get and expired
 	key := calcHash(k)
 	shard := c.GetShard(key)
-	shard.RLock()
+	shard.l.RLock()
 	item, found := shard.m[key]
-	shard.RUnlock()
+	shard.l.RUnlock()
 
 	if !found {
 		atomic.AddInt32(&c.Statistic.ErrorGetCount, 1)
@@ -171,15 +177,16 @@ func (c *cache) DeleteExpired() {
 	now := time.Now().UnixNano()
 	for i, _ := range c.shards {
 		sh := c.shards[i]
-		sh.Lock()
+		sh.l.Lock()
 		for k, v := range sh.m {
 			if v.Expiration > 0 && now > v.Expiration {
 				atomic.AddInt32(&c.Statistic.DeleteExpired, 1)
 				atomic.AddInt32(&c.Statistic.ItemsCount, -1)
+				atomic.AddInt32(&c.Statistic.ItemsCount, -v.Size)
 				delete(sh.m, k)
 			}
 		}
-		sh.Unlock()
+		sh.l.Unlock()
 	}
 
 }
@@ -194,6 +201,7 @@ func (c *cache) ItemCount() int32 {
 func (c *cache) Flush() {
 	c.newShardMap() //TODO init with params
 	c.Statistic.ItemsCount = 0
+	c.Statistic.Size = 0
 }
 
 type janitor struct {
