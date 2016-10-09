@@ -80,6 +80,8 @@ func calcHash(str string) uint64 {
 // (NoExpiration), the item never expires.
 func (c *cache) Set(k string, x []byte, d time.Duration) {
 	atomic.AddInt32(&c.Statistic.SetCount, 1)
+	atomic.AddInt32(&c.Statistic.ItemsCount, 1)
+	atomic.AddInt32(&c.Statistic.Size, int32(len(x)))
 	c.set(k, x, d)
 }
 
@@ -96,8 +98,6 @@ func (c *cache) set(k string, x []byte, d time.Duration) {
 	key := calcHash(k)
 	shard := c.GetShard(key)
 	size := int32(len(x))
-	atomic.AddInt32(&c.Statistic.ItemsCount, 1)
-	atomic.AddInt32(&c.Statistic.Size, size)
 	shard.l.Lock()
 	shard.m[key] = Item{
 		Object:     x,
@@ -115,6 +115,8 @@ func (c *cache) Add(k string, x []byte, d time.Duration) error {
 		return fmt.Errorf("Item %s already exists", k)
 	}
 	atomic.AddInt32(&c.Statistic.AddCount, 1)
+	atomic.AddInt32(&c.Statistic.ItemsCount, 1)
+	atomic.AddInt32(&c.Statistic.Size, int32(len(x)))
 	c.set(k, x, d)
 	return nil
 }
@@ -128,8 +130,7 @@ func (c *cache) Replace(k string, x []byte, d time.Duration) error {
 	}
 	size := int32(len(o.([]byte)))
 	atomic.AddInt32(&c.Statistic.ReplaceCount, 1)
-	atomic.AddInt32(&c.Statistic.ItemsCount, -1) //TODO is it rigth hack ?
-	atomic.AddInt32(&c.Statistic.Size, -size)
+	atomic.AddInt32(&c.Statistic.Size, int32(len(x))-size)
 	c.set(k, x, d)
 	return nil
 }
@@ -148,12 +149,6 @@ func (c *cache) Get(k string) (interface{}, bool) {
 		atomic.AddInt32(&c.Statistic.ErrorGetCount, 1)
 		return nil, false
 	}
-	/*
-		if item.expired() {
-			atomic.AddInt32(&c.Statistic.ErrorGetCount, 1)
-			return nil, false
-		}
-	*/
 	atomic.AddInt32(&c.Statistic.GetCount, 1)
 	return item.Object, true
 }
@@ -165,6 +160,7 @@ func (c *cache) Delete(k string) (interface{}, bool) {
 
 	if f {
 		atomic.AddInt32(&c.Statistic.ItemsCount, -1)
+		atomic.AddInt32(&c.Statistic.Size, -v.Size)
 		atomic.AddInt32(&c.Statistic.DeleteCount, 1)
 		delete(shard.m, key)
 		return v.Object, true

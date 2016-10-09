@@ -3,6 +3,7 @@ package cache
 import (
 	"flag"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"time"
@@ -46,13 +47,17 @@ func main() {
 		}
 
 	case mode_udp:
-		lnu, err := net.ListenUDP("udp", c.address)
+		udpAdd, err := net.ResolveUDPAddr("", c.address)
+		if err != nil {
+			log.Fatalln("Could not resolve address: " + c.address)
+		}
+		lnu, err := net.ListenUDP("udp", udpAdd)
 		if err != nil {
 			//TODO handle error
 		}
 		for {
 			buf := make([]byte, 8192) //TODO parametrize it 8k
-			n, addr, err := conn.ReadFromUDP(buffer)
+			_, _, err := lnu.ReadFromUDP(buf)
 			//TODO hande incoming message.
 
 			if err != nil {
