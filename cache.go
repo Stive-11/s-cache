@@ -2,7 +2,7 @@ package cache
 
 import (
 	"fmt"
-	"hash/fnv"
+
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -20,7 +20,7 @@ const (
 
 type lockMap struct {
 	l sync.RWMutex
-	m map[uint64]Item
+	m map[string]Item
 }
 
 type Item struct {
@@ -35,8 +35,9 @@ type Cache struct {
 }
 
 type cache struct {
+	calcHash          HashCalculator
 	defaultExpiration time.Duration
-	shards            []lockMap
+	shards            []*lockMap
 	shardCount        uint64
 	janitor           *janitor
 	Statistic         stats
@@ -49,11 +50,11 @@ type stats struct {
 func (c *cache) newShardMap() {
 	count := uint64(10)
 
-	c.shards = make([]lockMap, count)
+	c.shards = make([]*lockMap, count)
 	c.shardCount = count
 
-	for i, _ := range c.shards {
-		c.shards[i] = lockMap{m: make(map[uint64]Item)}
+	for i := range c.shards {
+		c.shards[i] = &lockMap{m: make(map[string]Item)}
 	}
 }
 
@@ -65,14 +66,9 @@ func (item Item) expired() bool {
 	return time.Now().UnixNano() > item.Expiration
 }
 
-func (c *cache) GetShard(key uint64) lockMap {
+func (c *cache) GetShard(str string) *lockMap {
+	key := c.calcHash(str)
 	return c.shards[key%c.shardCount]
-}
-
-func calcHash(str string) uint64 {
-	hash := fnv.New64a()
-	hash.Write([]byte(str))
-	return hash.Sum64()
 }
 
 // Add an item to the cache, replacing any existing item. If the duration is 0
@@ -95,11 +91,10 @@ func (c *cache) set(k string, x []byte, d time.Duration) {
 		e = time.Now().Add(d).UnixNano()
 	}
 
-	key := calcHash(k)
-	shard := c.GetShard(key)
+	shard := c.GetShard(k)
 	size := int32(len(x))
 	shard.l.Lock()
-	shard.m[key] = Item{
+	shard.m[k] = Item{
 		Object:     x,
 		Size:       size,
 		Expiration: e,
@@ -139,10 +134,9 @@ func (c *cache) Replace(k string, x []byte, d time.Duration) error {
 // whether the key was found.
 func (c *cache) Get(k string) (interface{}, bool) {
 	// "Inlining" of get and expired
-	key := calcHash(k)
-	shard := c.GetShard(key)
+	shard := c.GetShard(k)
 	shard.l.RLock()
-	item, found := shard.m[key]
+	item, found := shard.m[k]
 	shard.l.RUnlock()
 
 	if !found {
@@ -154,15 +148,14 @@ func (c *cache) Get(k string) (interface{}, bool) {
 }
 
 func (c *cache) Delete(k string) (interface{}, bool) {
-	key := calcHash(k)
-	shard := c.GetShard(key)
-	v, f := shard.m[key]
+	shard := c.GetShard(k)
+	v, f := shard.m[k]
 
 	if f {
 		atomic.AddInt32(&c.Statistic.ItemsCount, -1)
 		atomic.AddInt32(&c.Statistic.Size, -v.Size)
 		atomic.AddInt32(&c.Statistic.DeleteCount, 1)
-		delete(shard.m, key)
+		delete(shard.m, k)
 		return v.Object, true
 	}
 	return nil, false
@@ -171,7 +164,7 @@ func (c *cache) Delete(k string) (interface{}, bool) {
 // Delete all expired items from the cache.
 func (c *cache) DeleteExpired() {
 	now := time.Now().UnixNano()
-	for i, _ := range c.shards {
+	for i := range c.shards {
 		sh := c.shards[i]
 		sh.l.Lock()
 		for k, v := range sh.m {
@@ -238,6 +231,7 @@ func newCache(de time.Duration) *cache {
 	c := &cache{
 		defaultExpiration: de,
 	}
+	c.calcHash = calcSUM
 	c.newShardMap()
 	return c
 }
@@ -250,6 +244,7 @@ func newCacheWithJanitor(de time.Duration, ci time.Duration) *Cache {
 	// garbage collected, the finalizer stops the janitor goroutine, after
 	// which c can be collected.
 	C := &Cache{c}
+
 	if ci > 0 {
 		runJanitor(c, ci)
 		runtime.SetFinalizer(C, stopJanitor)

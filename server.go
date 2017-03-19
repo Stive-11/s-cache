@@ -6,35 +6,39 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"time"
 )
 
 const (
-	mode_http = "http"
-	mode_tcp  = "tcp"
-	mode_udp  = "udp"
+	MODE_HTTP = "http"
+	MODE_TCP  = "tcp"
+	MODE_UDP  = "udp"
+	MODE_TLS  = "tls"
+
+//	MODE_TLS  = "https"
 )
 
 type Config struct {
-	mode    string
-	address string
-
-	expiration int
+	Mode        string
+	BindAddress string
+	Expiration  int
+	HashFunc    string
 }
 
 func main() {
 	c := Config{}
 	c.initFlags()
-	cache := newCacheWithJanitor(time.Duration(c.expiration)*time.Second, time.Duration(c.expiration/10)*time.Second)
+	cache := newCacheWithJanitor(time.Duration(c.Expiration)*time.Second, time.Duration(c.Expiration/10)*time.Second)
 	cache.Add("a", []byte("am"), 0) //TODO delete this line
-	switch c.mode {
-	case mode_http:
-		err := http.ListenAndServe(c.address, nil)
+	switch c.Mode {
+	case MODE_HTTP:
+		err := http.ListenAndServe(c.BindAddress, nil)
 		if err != nil {
 			fmt.Printf("Error: %v", err)
 		}
-	case mode_tcp:
-		ln, err := net.Listen("tcp", c.address)
+	case MODE_TCP:
+		ln, err := net.Listen("tcp", c.BindAddress)
 		if err != nil {
 			//TODO handle error
 		}
@@ -46,10 +50,10 @@ func main() {
 			go handleTCPConnection(conn, cache)
 		}
 
-	case mode_udp:
-		udpAdd, err := net.ResolveUDPAddr("", c.address)
+	case MODE_UDP:
+		udpAdd, err := net.ResolveUDPAddr("", c.BindAddress)
 		if err != nil {
-			log.Fatalln("Could not resolve address: " + c.address)
+			log.Fatalln("Could not resolve address: " + c.BindAddress)
 		}
 		lnu, err := net.ListenUDP("udp", udpAdd)
 		if err != nil {
@@ -66,28 +70,29 @@ func main() {
 		}
 
 	default:
-		panic("Not implemented mode : " + c.mode)
+		panic("Not implemented mode : " + c.Mode)
 	}
 
 }
 
 func (c *Config) initFlags() {
-	flag.StringVar(&c.mode, "http", "http", "mode of cachec server: can be "+mode_http+" "+mode_tcp+" or "+mode_udp)
-	flag.StringVar(&c.address, "bind", "", "optional options to set listening specific interface: <ip ro hostname>:<port>")
-	flag.IntVar(&c.expiration, "expiration", 200, "expiration time in seconds")
+	flag.StringVar(&c.Mode, "http", "http", "mode of cachec server: can be "+MODE_HTTP+" "+MODE_TCP+" or "+MODE_UDP)
+	flag.StringVar(&c.BindAddress, "bind", "", "optional options to set listening specific interface: <ip ro hostname>:<port>")
+	flag.IntVar(&c.Expiration, "expiration", 200, "expiration time in seconds")
 	flag.Parse()
 
 	if err := c.checkFlags(); err != nil {
-		fmt.Errorf("Error: %v", err)
+		fmt.Printf("Error: %v", err)
 		flag.PrintDefaults()
+		os.Exit(1)
 	}
 }
 
 func (c *Config) checkFlags() error {
-	if c.mode != mode_http || c.mode != mode_tcp || c.mode != mode_udp {
-		fmt.Errorf("Wrong mode: %s", c.mode)
+	if c.Mode == MODE_HTTP || c.Mode == MODE_TCP || c.Mode == MODE_UDP {
+		return nil
 	}
-	return nil
+	return fmt.Errorf("Wrong mode: %s", c.Mode)
 }
 
 //TODO rebuild to get set command
